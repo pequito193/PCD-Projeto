@@ -1,0 +1,119 @@
+{
+  "quizzes": [
+    {
+      "name": "Quiz 1 (para testar)",
+      "questions": [
+        {
+          "question": "What is the fastest land animal in the world?",
+          "points": 5,
+          "correct": 1,
+          "options": [
+            "Lion",
+            "Cheetah",
+            "Horse",
+            "Leopard"
+          ]
+        },
+        {
+          "question": "Which of these animals can fly backward?",
+          "points": 4,
+          "correct": 1,
+          "options": [
+            "Pigeon",
+            "Hummingbird",
+            "Eagle",
+            "Sparrow"
+          ]
+        },
+        {
+          "question": "What is the largest mammal on Earth?",
+          "points": 3,
+          "correct": 0,
+          "options": [
+            "Blue whale",
+            "African elephant",
+            "Orca",
+            "Hippopotamus"
+          ]
+        },
+        {
+          "question": "Which animal can change its color to blend in with its surroundings?",
+          "points": 2,
+          "correct": 3,
+          "options": [
+            "Octopus",
+            "Frog",
+            "Clownfish",
+            "Chameleon"
+          ]
+        },
+        {
+          "question": "Which animal is known for having the longest neck?",
+          "points": 2,
+          "correct": 2,
+          "options": [
+            "Elephant",
+            "Horse",
+            "Giraffe",
+            "Camel"
+          ]
+        },
+        {
+          "question": "Which mammal lays eggs?",
+          "points": 4,
+          "correct": 0,
+          "options": [
+            "Platypus",
+            "Kangaroo",
+            "Koala",
+            "Bat"
+          ]
+        },
+        {
+          "question": "What is a baby kangaroo called?",
+          "points": 3,
+          "correct": 1,
+          "options": [
+            "Cub",
+            "Joey",
+            "Calf",
+            "Pup"
+          ]
+        },
+        {
+          "question": "Which bird is a universal symbol of peace?",
+          "points": 2,
+          "correct": 0,
+          "options": [
+            "Dove",
+            "Crow",
+            "Swan",
+            "Robin"
+          ]
+        },
+        {
+          "question": "What animal is famous for its black and white stripes?",
+          "points": 2,
+          "correct": 3,
+          "options": [
+            "Tiger",
+            "Panda",
+            "Skunk",
+            "Zebra"
+          ]
+        },
+        {
+          "question": "Which animal sleeps standing up?",
+          "points": 3,
+          "correct": 2,
+          "options": [
+            "Dog",
+            "Cat",
+            "Horse",
+            "Monkey"
+          ]
+        }
+      ]
+    }
+  ]
+}

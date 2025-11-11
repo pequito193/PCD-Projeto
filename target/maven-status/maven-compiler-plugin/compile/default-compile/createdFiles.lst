@@ -1,0 +1,6 @@
+model\Quiz.class
+model\Question.class
+model\GameState.class
+client\ClientGUI.class
+model\QuizFile.class
+utils\JsonLoader.class
