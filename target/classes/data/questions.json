@@ -6,7 +6,7 @@
         {
           "question": "What is the fastest land animal in the world?",
           "points": 5,
-          "correct": 1,
+          "correct": 2,
           "options": [
             "Lion",
             "Cheetah",
@@ -17,7 +17,7 @@
         {
           "question": "Which of these animals can fly backward?",
           "points": 4,
-          "correct": 1,
+          "correct": 2,
           "options": [
             "Pigeon",
             "Hummingbird",
@@ -28,7 +28,7 @@
         {
           "question": "What is the largest mammal on Earth?",
           "points": 3,
-          "correct": 0,
+          "correct": 1,
           "options": [
             "Blue whale",
             "African elephant",
@@ -39,7 +39,7 @@
         {
           "question": "Which animal can change its color to blend in with its surroundings?",
           "points": 2,
-          "correct": 3,
+          "correct": 4,
           "options": [
             "Octopus",
             "Frog",
@@ -50,7 +50,7 @@
         {
           "question": "Which animal is known for having the longest neck?",
           "points": 2,
-          "correct": 2,
+          "correct": 3,
           "options": [
             "Elephant",
             "Horse",
@@ -61,7 +61,7 @@
         {
           "question": "Which mammal lays eggs?",
           "points": 4,
-          "correct": 0,
+          "correct": 1,
           "options": [
             "Platypus",
             "Kangaroo",
@@ -72,7 +72,7 @@
         {
           "question": "What is a baby kangaroo called?",
           "points": 3,
-          "correct": 1,
+          "correct": 2,
           "options": [
             "Cub",
             "Joey",
@@ -83,7 +83,7 @@
         {
           "question": "Which bird is a universal symbol of peace?",
           "points": 2,
-          "correct": 0,
+          "correct": 1,
           "options": [
             "Dove",
             "Crow",
@@ -94,7 +94,7 @@
         {
           "question": "What animal is famous for its black and white stripes?",
           "points": 2,
-          "correct": 3,
+          "correct": 4,
           "options": [
             "Tiger",
             "Panda",
@@ -105,7 +105,7 @@
         {
           "question": "Which animal sleeps standing up?",
           "points": 3,
-          "correct": 2,
+          "correct": 3,
           "options": [
             "Dog",
             "Cat",

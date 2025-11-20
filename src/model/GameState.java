@@ -44,7 +44,10 @@ public class GameState {
         return teamScores;
     }
 
-    public int getCurrentIndex() { return currentIndex; }
-    public int getTotalQuestions() { return quiz.getQuestions().size(); }
-    public String getQuizName() { return quiz.getName(); }
+    public int getCurrentIndex() {
+        return currentIndex; }
+    public int getTotalQuestions() {
+        return quiz.getQuestions().size(); }
+    public String getQuizName() {
+        return quiz.getName(); }
 }

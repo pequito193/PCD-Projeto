@@ -19,6 +19,7 @@ public class ClientGUI {
     private GameState gameState;
     private int myTeam = 0; // testamos como se o jogador pertencesse à equipa 0
 
+
     public ClientGUI(GameState gs) {
         this.gameState = gs;
         createAndShowGUI();
@@ -45,6 +46,7 @@ public class ClientGUI {
         }
         frame.add(center, BorderLayout.CENTER);
 
+
         JPanel south = new JPanel(new FlowLayout());
         lblTimer = new JLabel("Tempo: 30");
         lblScore = new JLabel("Placar: " + gameState.getTeamScores());
@@ -64,6 +66,8 @@ public class ClientGUI {
         frame.setVisible(true);
     }
 
+
+
     private void loadQuestionToUI() {
         Question q = gameState.getCurrentQuestion();
 
@@ -78,6 +82,7 @@ public class ClientGUI {
         List<String> opts = q.getOptions();
 
         for (int i=0;i<4;i++) {
+            optionButtons[i].setBackground(Color.LIGHT_GRAY);
             optionButtons[i].setText((i < opts.size()) ? opts.get(i) : "---");
             optionButtons[i].setEnabled(i < opts.size());
         }
@@ -104,18 +109,20 @@ public class ClientGUI {
 
     private void submitAnswer(int optionIdx) {
         Question q = gameState.getCurrentQuestion();
+        JButton chosen = optionButtons[optionIdx - 1];
+        JButton answer = optionButtons[q.getCorrect() - 1];
 
         if (q == null) return;
-
-        // TODO: a resposta é sempre marcada como incorreta por algum motivo
         if (optionIdx == q.getCorrect()) {
+            chosen.setBackground(Color.GREEN);
             gameState.addPointsToTeam(myTeam, q.getPoints());
-            JOptionPane.showMessageDialog(frame, "Resposta correta! +" + q.getPoints() + " pontos.");
+            JOptionPane.showMessageDialog(frame, q.getPoints() + " pontos.");
+            lblScore.setText("Placar: " + gameState.getTeamScores());
         } else {
-            JOptionPane.showMessageDialog(frame, "Resposta incorreta."); 
+            chosen.setBackground(Color.RED);
+            answer.setBackground(Color.GREEN);
+            JOptionPane.showMessageDialog(frame, "0 pontos.");
         }
-
-        lblScore.setText("Placar: " + gameState.getTeamScores());
 
         // Esperar pela próxima pergunta
         if (swingTimer != null) swingTimer.stop();
