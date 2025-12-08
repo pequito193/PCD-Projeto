@@ -134,7 +134,7 @@ public class Server {
                         currentBarrier = new TeamBarrier(clients.size());
                     } else {
                         currentBarrier = null;
-                        currentLatch = new ModifiedCountDownLatch(clients.size());
+                        currentLatch = new ModifiedCountDownLatch(2, 1, 10000, clients.size());
                     }
                 }
                 // 2. Enviar a pergunta a todos
@@ -156,7 +156,7 @@ public class Server {
                 // O servidor fica preso aqui até o tempo acabar ou todos responderem
                 if (isTeamRound) {
                     System.out.println("Servidor à espera na Barreira (Modo Equipa)...");
-                    currentBarrier.startTimer(); 
+                    currentBarrier.await(); 
                     // AQUI entra a lógica de calcular pontos de equipa (todos certos = dobro)
                     // Podes implementar o cálculo aqui ou deixar o DealWithClient tratar
                     System.out.println("Barreira libertada (ou tempo esgotou).");
@@ -208,7 +208,7 @@ public class Server {
                     }
                 } else {
                     System.out.println("Servidor à espera no Latch (Modo Individual)...");
-                    currentLatch.startTimer();
+                    currentLatch.await();
                     System.out.println("Latch libertado (ou tempo esgotou).");
                 }
 

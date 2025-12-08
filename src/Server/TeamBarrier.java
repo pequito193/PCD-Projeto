@@ -34,7 +34,7 @@ public class TeamBarrier {
     }
 
     // Chamado pelo Server para esperar que a equipa responda
-    public void startTimer() throws InterruptedException {
+    public void await() throws InterruptedException {
         lock.lock();
         try {
             // Espera enquanto ainda faltam respostas E o tempo não acabou
