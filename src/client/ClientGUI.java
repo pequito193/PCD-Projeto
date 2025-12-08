@@ -1,7 +1,7 @@
 package client;
 
 import common.Msg;
-import model.Question; // Ainda precisamos disto para o cast
+import model.Question;
 import javax.swing.*;
 import java.awt.*;
 import java.io.ObjectInputStream;
@@ -14,40 +14,38 @@ public class ClientGUI {
     private JLabel lblQuestion;
     private JButton[] optionButtons;
     private JLabel lblTimer;
-    private JLabel lblScore;
-    
-    // REDE: Variáveis novas
+    private JLabel lblStatus; // Substitui o lblScore para mensagens gerais
+
     private Socket socket;
     private ObjectOutputStream out;
     private ObjectInputStream in;
     
-    // ESTADO LOCAL (Apenas para visualização)
-    private int myPoints = 0; 
+    private String username;
+    private String teamId;
 
-    public ClientGUI(String serverAddress, int serverPort) {
+    public ClientGUI(String serverAddress, int serverPort, String username, String teamId) {
+        this.username = username;
+        this.teamId = teamId;
         createAndShowGUI();
         connectToServer(serverAddress, serverPort);
     }
 
     private void createAndShowGUI() {
-        // (IGUAL AO QUE TINHAS ANTES, só removi o botão "Próxima Pergunta" 
-        // porque agora é o servidor que decide quando muda a pergunta)
-        
-        frame = new JFrame("IsKahoot - Cliente");
+        frame = new JFrame("IsKahoot - " + username + " (Equipa " + teamId + ")");
         frame.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
-        frame.setSize(700, 400);
+        frame.setSize(600, 400);
         frame.setLayout(new BorderLayout());
 
-        lblQuestion = new JLabel("À espera do jogo...", SwingConstants.CENTER);
-        lblQuestion.setFont(new Font("SansSerif", Font.BOLD, 18));
+        lblQuestion = new JLabel("A ligar ao servidor...", SwingConstants.CENTER);
+        lblQuestion.setFont(new Font("SansSerif", Font.BOLD, 16));
         frame.add(lblQuestion, BorderLayout.NORTH);
 
         JPanel center = new JPanel(new GridLayout(2, 2, 10, 10));
         optionButtons = new JButton[4];
         for (int i = 0; i < 4; i++) {
             optionButtons[i] = new JButton("Opção " + (i + 1));
-            optionButtons[i].setEnabled(false); // Começam desativados
-            final int idx = i + 1;
+            optionButtons[i].setEnabled(false);
+            final int idx = i + 1; // 1-based index
             optionButtons[i].addActionListener(e -> submitAnswer(idx));
             center.add(optionButtons[i]);
         }
@@ -55,9 +53,10 @@ public class ClientGUI {
 
         JPanel south = new JPanel(new FlowLayout());
         lblTimer = new JLabel("Tempo: --");
-        lblScore = new JLabel("Meus Pontos: 0"); // Simplificado para teste
+        lblStatus = new JLabel("Estado: À espera");
         south.add(lblTimer);
-        south.add(lblScore);
+        south.add(Box.createHorizontalStrut(20));
+        south.add(lblStatus);
         frame.add(south, BorderLayout.SOUTH);
 
         frame.setVisible(true);
@@ -66,94 +65,96 @@ public class ClientGUI {
     private void connectToServer(String host, int port) {
         try {
             socket = new Socket(host, port);
-            // Ordem importante: Output primeiro!
             out = new ObjectOutputStream(socket.getOutputStream());
             in = new ObjectInputStream(socket.getInputStream());
 
-            // Enviar LOGIN (Exemplo fixo para teste)
-            out.writeObject(new Msg(Msg.Type.LOGIN, "JogadorTeste"));
+            // Envia LOGIN com o Username
+            out.writeObject(new Msg(Msg.Type.LOGIN, username));
 
-            // Iniciar a Thread que escuta o servidor
             new Thread(new ServerListener()).start();
 
         } catch (Exception e) {
-            JOptionPane.showMessageDialog(frame, "Erro ao ligar ao servidor: " + e.getMessage());
-            e.printStackTrace();
+            JOptionPane.showMessageDialog(frame, "Erro: " + e.getMessage());
             System.exit(1);
         }
     }
 
-    // --- Lógica de Envio ---
     private void submitAnswer(int optionIdx) {
         try {
-            // Em vez de verificar se está certo, enviamos a escolha ao servidor
             out.writeObject(new Msg(Msg.Type.SEND_ANSWER, optionIdx));
             
-            // Desativar botões para não responder duas vezes
+            // Bloqueia botões após responder
             for (JButton b : optionButtons) b.setEnabled(false);
-            lblQuestion.setText("Resposta enviada. À espera...");
-            
+            lblStatus.setText("Resposta enviada!");
         } catch (Exception e) {
             e.printStackTrace();
         }
     }
 
-    // --- Lógica de Receção (Thread separada) ---
     private class ServerListener implements Runnable {
         @Override
         public void run() {
             try {
                 while (true) {
-                    // Bloqueia aqui à espera de mensagens do servidor
                     Object received = in.readObject();
                     if (received instanceof Msg) {
-                        Msg msg = (Msg) received;
-                        
-                        // SwingUtilities.invokeLater garante que mexemos na GUI na thread correta
-                        SwingUtilities.invokeLater(() -> processMessage(msg));
+                        SwingUtilities.invokeLater(() -> processMessage((Msg) received));
                     }
                 }
             } catch (Exception e) {
-                System.out.println("Ligação perdida.");
+                System.out.println("Desconectado do servidor.");
             }
         }
     }
 
-    // O "Cérebro" do Cliente agora só reage a ordens
     private void processMessage(Msg msg) {
-        System.out.println("Cliente recebeu: " + msg); // Debug
-
         switch (msg.type) {
             case LOGIN_OK:
-                lblQuestion.setText("Login aceite! À espera da ronda...");
+                lblQuestion.setText("Login OK! À espera que o jogo comece...");
                 break;
 
-            case NEW_QUESTION: // Servidor mandou uma pergunta!
-                // Assumindo que msg.content é um objeto Question ou uma String formatada
-                // Para simplificar agora, vamos assumir que o servidor manda o objeto Question
+            case NEW_QUESTION:
                 if (msg.content instanceof Question) {
                     Question q = (Question) msg.content;
-                    lblQuestion.setText(q.getQuestion());
+                    lblQuestion.setText("<html><div style='text-align: center;'>" + q.getQuestion() + "</div></html>");
+                    
                     List<String> opts = q.getOptions();
                     for (int i = 0; i < 4; i++) {
-                        optionButtons[i].setText((i < opts.size()) ? opts.get(i) : "");
-                        optionButtons[i].setEnabled(i < opts.size());
-                        optionButtons[i].setBackground(null); // Reset cor
+                        if (i < opts.size()) {
+                            optionButtons[i].setText(opts.get(i));
+                            optionButtons[i].setEnabled(true);
+                        } else {
+                            optionButtons[i].setText("");
+                            optionButtons[i].setEnabled(false);
+                        }
                     }
+                    lblStatus.setText("Responde rápido!");
                 }
                 break;
                 
             case GAME_OVER:
-                lblQuestion.setText("Fim do Jogo!");
+                lblQuestion.setText("FIM DO JOGO!");
+                lblStatus.setText((String) msg.content);
                 for (JButton b : optionButtons) b.setEnabled(false);
                 break;
-                
-            // Outros casos: UPDATE_SCORE, etc.
         }
     }
 
     public static void main(String[] args) {
-        // Agora o main é limpo: só arranca a GUI e liga ao localhost
-        SwingUtilities.invokeLater(() -> new ClientGUI("localhost", 12345));
+        // Agora verificamos os argumentos conforme o enunciado
+        if (args.length < 5) {
+            System.out.println("Uso correto: java client.ClientGUI <IP> <PORT> <JOGO> <EQUIPA> <USERNAME>");
+            // Para facilitar os testes no IDE, podes descomentar a linha abaixo se não quiseres passar args sempre:
+             SwingUtilities.invokeLater(() -> new ClientGUI("localhost", 12345, "Player1", "EqA"));
+            // return;
+        } else {
+            String ip = args[0];
+            int port = Integer.parseInt(args[1]);
+            // String gameId = args[2]; // Ainda não usado no protocolo simples
+            String teamId = args[3];
+            String username = args[4];
+
+            SwingUtilities.invokeLater(() -> new ClientGUI(ip, port, username, teamId));
+        }
     }
 }
