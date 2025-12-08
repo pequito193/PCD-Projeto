@@ -110,7 +110,7 @@ public class Server {
                 // O servidor fica preso aqui até o tempo acabar ou todos responderem
                 if (isTeamRound) {
                     System.out.println("Servidor à espera na Barreira (Modo Equipa)...");
-                    currentBarrier.await(30000); 
+                    currentBarrier.startTimer(); 
                     // AQUI entra a lógica de calcular pontos de equipa (todos certos = dobro)
                     // Podes implementar o cálculo aqui ou deixar o DealWithClient tratar
                     System.out.println("Barreira libertada (ou tempo esgotou).");

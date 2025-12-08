@@ -5,14 +5,12 @@ public class ModifiedCountDownLatch {
 
     private int count;          // Quantos jogadores faltam responder
     private int bonusCount;     // Quantos bónus ainda há disponíveis
-    private int remainingTime;  // Quanto tempo falta para acabar a ronda
     private final int totalPlayers;
 
     public ModifiedCountDownLatch(int totalPlayers) {
         this.totalPlayers = totalPlayers;
         this.count = totalPlayers;
         this.bonusCount = 1; // Os 2 primeiros a responder ganham bónus
-        this.remainingTime = TEMPO_RESPOSTA;
     }
 
     // Chamado pelos clientes quando respondem
@@ -38,7 +36,7 @@ public class ModifiedCountDownLatch {
     // Chamado pelo Servidor para esperar pelas respostas
     public synchronized void startTimer() throws InterruptedException {
         if (count > 0) {
-            wait(remainingTime);
+            wait(TEMPO_RESPOSTA);
 
             notifyAll();
         }

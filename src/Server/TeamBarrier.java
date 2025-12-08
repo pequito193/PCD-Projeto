@@ -5,6 +5,8 @@ import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReentrantLock;
 
 public class TeamBarrier {
+    private static final int TEMPO_RESPOSTA = 10000;  // 10s
+
     private final int totalMembers;
     private int count;
     private final Lock lock = new ReentrantLock();
@@ -32,13 +34,13 @@ public class TeamBarrier {
     }
 
     // Chamado pelo Server para esperar que a equipa responda
-    public void await(long timeoutMillis) throws InterruptedException {
+    public void startTimer() throws InterruptedException {
         lock.lock();
         try {
             // Espera enquanto ainda faltam respostas E o tempo não acabou
             if (count > 0 && !timeExpired) {
                 // O método await da Condition retorna false se o tempo esgotar
-                boolean timeLeft = trip.await(timeoutMillis, java.util.concurrent.TimeUnit.MILLISECONDS);
+                boolean timeLeft = trip.await(TEMPO_RESPOSTA, java.util.concurrent.TimeUnit.MILLISECONDS);
                 
                 if (!timeLeft) {
                     timeExpired = true;
