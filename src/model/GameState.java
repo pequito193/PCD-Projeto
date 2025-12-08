@@ -1,9 +1,10 @@
 package model;
 
+import java.io.Serializable;
 import java.util.ArrayList;
 import java.util.List;
 
-public class GameState {
+public class GameState implements Serializable {
     private Quiz quiz;
     private int currentIndex;
     private List<Integer> teamScores;
@@ -50,4 +51,7 @@ public class GameState {
         return quiz.getQuestions().size(); }
     public String getQuizName() {
         return quiz.getName(); }
+    public Quiz getQuiz() {
+        return quiz;}
+
 }
