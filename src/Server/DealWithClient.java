@@ -12,6 +12,7 @@ public class DealWithClient extends Thread {
     private ObjectInputStream in;
     private Server server;
     private String username; // Nome do jogador
+    private boolean lastAnswerCorrect = false;
 
     public DealWithClient(Socket socket, Server server) {
         this.socket = socket;
@@ -57,42 +58,58 @@ public class DealWithClient extends Thread {
                     break;
 
                 case SEND_ANSWER:
-                    // 1. Verificar se estamos numa ronda válida
-                    ModifiedCountDownLatch latch = server.getCurrentLatch();
-                    if (latch == null) return; // Jogo não está à espera de resposta
-
-                    // 2. Obter a resposta do cliente (int index da opção)
-                    int answerIndex = (int) msg.content;
-                    
-                    // 3. Obter pergunta atual para validar
+                    // 1. Verificar se o jogo está ativo e a pergunta existe
                     Question currentQ = server.getGameState().getCurrentQuestion();
                     if (currentQ == null) return;
 
-                    // 4. Verificar se acertou
-                    // Nota: Assume-se que correct no JSON é 1-based, e a GUI manda 1-based
-                    boolean correct = (answerIndex == currentQ.getCorrect());
+                    // 2. Ler a resposta do cliente (índice da opção)
+                    int answerIndex = (int) msg.content;
 
-                    // 5. Chamar o Latch para obter o bónus (e avisar que respondemos)
-                    // O Latch decrementa sempre, independentemente de acertar ou não
-                    int bonus = latch.countDown();
+                    // 3. Verificar se acertou (comparar com o índice correto do JSON)
+                    // Guardamos na variável global para o Servidor consultar nas rondas de equipa
+                    this.lastAnswerCorrect = (answerIndex == currentQ.getCorrect());
 
-                    if (correct) {
-                        int points = currentQ.getPoints() * bonus;
-                        
-                        // 6. Adicionar pontos à equipa
-                        int myTeamId = server.getTeamIdForPlayer(this);
-                        
-                        // Sincronizar acesso ao GameState se necessário (ou o método lá já ser sync)
-                        // Como GameState não é sync, fazemos aqui ou no Server
-                        synchronized (server.getGameState()) {
-                            server.getGameState().addPointsToTeam(myTeamId, points);
+                    if (server.isTeamRound()) {
+                        // --- MODO EQUIPA ---
+                        // Nas rondas de equipa, NÃO calculamos pontos aqui.
+                        // Apenas registamos que acabámos e esperamos na barreira.
+                        // A pontuação será calculada pelo Servidor quando a barreira desbloquear. [cite: 75]
+        
+                        TeamBarrier barrier = server.getCurrentBarrier();
+                        if (barrier != null) {
+                            barrier.playerFinished(); // Avisa a barreira que este jogador já respondeu
+                
+                            String status = this.lastAnswerCorrect ? "CERTO (aguarda equipa)" : "ERRADO (aguarda equipa)";
+                            System.out.println("Equipa: Jogador " + username + " respondeu: " + status);
                         }
-                        
-                        System.out.println("Jogador " + username + " acertou! Pontos: " + points + " (Bónus: " + bonus + ")");
                     } else {
-                        System.out.println("Jogador " + username + " errou.");
+                        // --- MODO INDIVIDUAL ---
+                        // Nas rondas individuais, calculamos logo os pontos com bónus de rapidez.
+        
+                        ModifiedCountDownLatch latch = server.getCurrentLatch();
+                        if (latch != null) {
+                            // O countdown devolve o multiplicador (2x se for rápido, 1x normal) [cite: 78]
+                            int bonus = latch.countDown();
+
+                            if (this.lastAnswerCorrect) {
+                                // Calcula pontos: Base * Bónus
+                                int points = currentQ.getPoints() * bonus;
+                
+                                // Adiciona imediatamente aos pontos da equipa
+                                int myTeamId = server.getTeamIdForPlayer(this);
+                
+                                // Sincronizar porque várias threads podem escrever no GameState ao mesmo tempo
+                                synchronized (server.getGameState()) {
+                                        server.getGameState().addPointsToTeam(myTeamId, points);
+                                }
+                
+                                System.out.println("Individual: " + username + " ganhou " + points + " pontos (Bónus: " + bonus + ")");
+                            } else {
+                                System.out.println("Individual: " + username + " errou.");
+                            }
+                        }
                     }
-                    break;
+                break;
 
                 default:
                     System.out.println("Mensagem desconhecida: " + msg.type);
@@ -101,4 +118,8 @@ public class DealWithClient extends Thread {
             e.printStackTrace();
         }
     }
+
+    public boolean isLastAnswerCorrect() {
+    return lastAnswerCorrect;
+}
 }

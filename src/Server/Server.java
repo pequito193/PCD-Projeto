@@ -16,9 +16,10 @@ public class Server {
     private static final int TEMPO_ESPERA = 3000;     // 3s
     private GameState gameState;
     private final List<DealWithClient> clients = new ArrayList<>();
-    
-    // Variável de concorrência para a pergunta atual
     private ModifiedCountDownLatch currentLatch;
+    private TeamBarrier currentBarrier;
+    private boolean isTeamRound = false;
+    
 
     public Server(String jsonPath) {
         try {
@@ -51,7 +52,7 @@ public class Server {
                     System.out.println("Novo jogador ligado. Total: " + clients.size());
 
                     // Para testes: arranca o jogo quando tivermos 2 jogadores
-                    if (clients.size() == 2) { 
+                    if (clients.size() == 3) { 
                         new Thread(this::startGame).start();
                     }
                 }
@@ -66,52 +67,127 @@ public class Server {
             System.out.println("O jogo vai começar em 3 segundos...");
             Thread.sleep(TEMPO_ESPERA);
 
-            // CICLO DO JOGO (percorre todas as perguntas)
-            // Nota: O GameState controla o índice.
-            // Vamos fazer um loop enquanto houver perguntas.
-            // Para simplificar, vou iterar sobre a lista do quiz diretamente
             List<Question> questions = gameState.getQuiz().getQuestions();
-            
+
             for (int i = 0; i < questions.size(); i++) {
                 Question q = questions.get(i);
-                System.out.println("A iniciar pergunta: " + q.getQuestion());
+                
+                // Regra do Enunciado: Alternar entre Individual e Equipa
+                // Índice Par (0, 2...) = Individual
+                // Índice Ímpar (1, 3...) = Equipa
+                this.isTeamRound = (i % 2 != 0); 
 
-                // 1. Criar o Latch para esta ronda (espera por N respostas)
-                synchronized (clients) {
-                    currentLatch = new ModifiedCountDownLatch(clients.size());
+                System.out.println("\n--- PERGUNTA " + (i + 1) + " (" + (isTeamRound ? "EQUIPA" : "INDIVIDUAL") + ") ---");
+
+                // DEBUG: Ver quantas pessoas o servidor "vê"
+                synchronized(clients) {
+                    System.out.println("Jogadores ativos: " + clients.size() + " jogadores.");
+                    
+                    if (isTeamRound) {
+                        currentLatch = null;
+                        currentBarrier = new TeamBarrier(clients.size());
+                    } else {
+                        currentBarrier = null;
+                        currentLatch = new ModifiedCountDownLatch(clients.size());
+                    }
+                }
+                // 2. Enviar a pergunta a todos
+                // Podes adicionar "(EQUIPA)" ao texto da pergunta para avisar os jogadores
+                if (isTeamRound) {
+                    // Pequeno truque visual para o cliente saber que é de equipa
+                    Question qTeam = new Question(
+                        "[EQUIPA] " + q.getQuestion(), 
+                        q.getPoints(), 
+                        q.getCorrect(), 
+                        q.getOptions()
+                    );
+                    broadcast(new Msg(Msg.Type.NEW_QUESTION, qTeam));
+                } else {
+                    broadcast(new Msg(Msg.Type.NEW_QUESTION, q));
                 }
 
-                // 2. Enviar pergunta a todos
-                broadcast(new Msg(Msg.Type.NEW_QUESTION, q));
+                // 3. BLOQUEAR: Esperar pelas respostas (30 segundos)
+                // O servidor fica preso aqui até o tempo acabar ou todos responderem
+                if (isTeamRound) {
+                    System.out.println("Servidor à espera na Barreira (Modo Equipa)...");
+                    currentBarrier.await(30000); 
+                    // AQUI entra a lógica de calcular pontos de equipa (todos certos = dobro)
+                    // Podes implementar o cálculo aqui ou deixar o DealWithClient tratar
+                    System.out.println("Barreira libertada (ou tempo esgotou).");
+                    // --- CÁLCULO DE PONTOS DE EQUIPA ---
+                    // 1. Organizar jogadores por equipa para facilitar a verificação
+                    // (Num sistema real usarias um Map<String, List>, aqui usamos arrays simples baseados no ID numérico)
+                    int numTeams = gameState.getTeamScores().size();
+                    boolean[] teamAllCorrect = new boolean[numTeams];
+                    boolean[] teamAtLeastOneCorrect = new boolean[numTeams];
+                    
+                    // Inicializar arrays como "verdadeiro" para a lógica de verificação
+                    for(int t=0; t<numTeams; t++) {
+                        teamAllCorrect[t] = true;   // Assumimos que todos acertaram até prova em contrário
+                        teamAtLeastOneCorrect[t] = false;
+                    }
+                    synchronized(clients) {
+                        for (DealWithClient client : clients) {
+                            int teamId = getTeamIdForPlayer(client);
+                            boolean correct = client.isLastAnswerCorrect(); // Método que criámos no passo anterior
+                            
+                            if (correct) {
+                                teamAtLeastOneCorrect[teamId] = true;
+                            } else {
+                                teamAllCorrect[teamId] = false; // Um falhou, logo a equipa não tem bónus
+                            }
+                        }
+                    }
+                    // 2. Distribuir pontos
+                    int basePoints = q.getPoints();
+                    
+                    for (int t = 0; t < numTeams; t++) {
+                        int pointsToAdd = 0;
+                        
+                        if (teamAllCorrect[t]) {
+                            // Todos acertaram: DUPLA COTAÇÃO
+                            pointsToAdd = basePoints * 2;
+                            System.out.println("Equipa " + t + ": TODOS acertaram! (Pontos x2: " + pointsToAdd + ")");
+                        } else if (teamAtLeastOneCorrect[t]) {
+                            // Alguém falhou, mas pelo menos um acertou: COTAÇÃO NORMAL (sem bónus)
+                            pointsToAdd = basePoints;
+                            System.out.println("Equipa " + t + ": Acertaram parcialmente. (Pontos normais: " + pointsToAdd + ")");
+                        } else {
+                            System.out.println("Equipa " + t + ": Ninguém acertou.");
+                        }
 
-                // 3. BLOQUEAR: Esperar 10 segundos ou até todos responderem
-                System.out.println("À espera de respostas...");
-                currentLatch.startTimer(); 
-                System.out.println("Fim do tempo ou todos responderam.");
+                        if (pointsToAdd > 0) {
+                            gameState.addPointsToTeam(t, pointsToAdd);
+                        }
+                    }
+                } else {
+                    System.out.println("Servidor à espera no Latch (Modo Individual)...");
+                    currentLatch.startTimer();
+                    System.out.println("Latch libertado (ou tempo esgotou).");
+                }
 
-                // 4. (Opcional) Enviar placar atualizado aqui
-                // broadcast(new Msg(Msg.Type.UPDATE_SCORE, gameState.getTeamScores()));
-
-                // 5. Preparar próxima pergunta
+                // 4. Pausa antes da próxima pergunta e avança índice
                 gameState.nextQuestion();
                 
                 // Pequena pausa entre perguntas
                 Thread.sleep(TEMPO_ESPERA);
             }
 
-            System.out.println("Jogo Terminado. A calcular pontuações...");
-
-            // 1. Construir uma String com a classificação final
-            StringBuilder sb = new StringBuilder("<html><div style='text-align: center;'>FIM DO JOGO!<br><br>");
+            // --- FIM DO JOGO ---
+            System.out.println("Todas as perguntas respondidas. A enviar classificações...");
+            
+            // Construir o Placar Final em HTML para aparecer bonito na GUI
+            StringBuilder sb = new StringBuilder("<html><div style='text-align: center;'><h1>FIM DO JOGO!</h1>");
             List<Integer> scores = gameState.getTeamScores();
-
-            for (int i = 0; i < scores.size(); i++) {
-                // Nota: Como simplificámos e não temos nomes de equipas guardados, usamos "Equipa X"
-                sb.append("Equipa ").append(i).append(": ").append(scores.get(i)).append(" pontos<br>");
+            
+            sb.append("<table border='1' style='margin: auto;'><tr><th>Equipa</th><th>Pontos</th></tr>");
+            for (int t = 0; t < scores.size(); t++) {
+                sb.append("<tr><td>Equipa ").append(t).append("</td>");
+                sb.append("<td>").append(scores.get(t)).append("</td></tr>");
             }
-            sb.append("</div></html>");
+            sb.append("</table></div></html>");
 
-            // 2. Enviar a classificação dentro da mensagem de GAME_OVER
+            // Envia mensagem final
             broadcast(new Msg(Msg.Type.GAME_OVER, sb.toString()));
 
         } catch (InterruptedException e) {
@@ -151,6 +227,15 @@ public class Server {
             return clients.indexOf(client) % 2; 
         }
     }
+
+    public boolean isTeamRound() {
+        return isTeamRound;
+    }
+
+    public TeamBarrier getCurrentBarrier() {
+        return currentBarrier;
+    }
+
 
     public static void main(String[] args) {
         // Certifica-te que o caminho do JSON está correto
