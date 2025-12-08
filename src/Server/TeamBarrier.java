@@ -15,9 +15,9 @@ public class TeamBarrier {
     // Variável para saber se o tempo acabou (o teu colega vai precisar disto)
     private boolean timeExpired = false;
 
-    public TeamBarrier(int teamSize) {
-        this.totalMembers = teamSize;
-        this.count = teamSize;
+    public TeamBarrier(int PlayerSize) {
+        this.totalMembers = PlayerSize;
+        this.count = PlayerSize;
     }
 
     // Chamado pelo DealWithClient quando recebe uma resposta
@@ -34,7 +34,7 @@ public class TeamBarrier {
     }
 
     // Chamado pelo Server para esperar que a equipa responda
-    public void startTimer() throws InterruptedException {
+    public void await() throws InterruptedException {
         lock.lock();
         try {
             // Espera enquanto ainda faltam respostas E o tempo não acabou

@@ -1,42 +1,39 @@
 package Server;
 
 public class ModifiedCountDownLatch {
-    private static final int TEMPO_RESPOSTA = 10000;  // 10s
+    private int waitPeriod;  // 10s
+    private int count;
+    private int bonusCount;
+    private int bonusFactor;
 
-    private int count;          // Quantos jogadores faltam responder
-    private int bonusCount;     // Quantos bónus ainda há disponíveis
-    private final int totalPlayers;
-
-    public ModifiedCountDownLatch(int totalPlayers) {
-        this.totalPlayers = totalPlayers;
-        this.count = totalPlayers;
-        this.bonusCount = 1; // Os 2 primeiros a responder ganham bónus
-    }
+    public ModifiedCountDownLatch(int bonusFactor, int bonusCount, int waitPeriod, int count) {
+        this.bonusFactor = bonusFactor;
+        this.waitPeriod = waitPeriod;
+        this.bonusCount = bonusCount;
+        this.count = count;
+        }
 
     // Chamado pelos clientes quando respondem
     public synchronized int countDown() {
-        if (count <= 0) return 1; // Já acabou
+        if (count <= 0) return 1; 
 
         count--;
         
-        int bonusMultiplier = 1;
         if (bonusCount > 0) {
-            bonusMultiplier = 2; // Dobro dos pontos
             bonusCount--;
         }
 
-        // Se todos responderam, acorda o servidor
         if (count == 0) {
             notifyAll();
         }
 
-        return bonusMultiplier;
+        return bonusFactor;
     }
 
     // Chamado pelo Servidor para esperar pelas respostas
-    public synchronized void startTimer() throws InterruptedException {
+    public synchronized void await() throws InterruptedException {
         if (count > 0) {
-            wait(TEMPO_RESPOSTA);
+            wait(waitPeriod);
 
             notifyAll();
         }
