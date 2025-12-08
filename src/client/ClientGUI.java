@@ -13,7 +13,6 @@ public class ClientGUI {
     private JFrame frame;
     private JLabel lblQuestion;
     private JButton[] optionButtons;
-    private JLabel lblTimer;
     private JLabel lblStatus; // Substitui o lblScore para mensagens gerais
 
     private Socket socket;
@@ -52,9 +51,7 @@ public class ClientGUI {
         frame.add(center, BorderLayout.CENTER);
 
         JPanel south = new JPanel(new FlowLayout());
-        lblTimer = new JLabel("Tempo: --");
         lblStatus = new JLabel("Estado: À espera");
-        south.add(lblTimer);
         south.add(Box.createHorizontalStrut(20));
         south.add(lblStatus);
         frame.add(south, BorderLayout.SOUTH);

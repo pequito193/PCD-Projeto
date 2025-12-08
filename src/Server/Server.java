@@ -13,6 +13,7 @@ import java.util.List;
 
 public class Server {
     private static final int PORT = 12345;
+    private static final int TEMPO_ESPERA = 3000;     // 3s
     private GameState gameState;
     private final List<DealWithClient> clients = new ArrayList<>();
     
@@ -62,8 +63,8 @@ public class Server {
 
     private void startGame() {
         try {
-            System.out.println("O jogo vai começar em 5 segundos...");
-            Thread.sleep(5000);
+            System.out.println("O jogo vai começar em 3 segundos...");
+            Thread.sleep(TEMPO_ESPERA);
 
             // CICLO DO JOGO (percorre todas as perguntas)
             // Nota: O GameState controla o índice.
@@ -83,9 +84,9 @@ public class Server {
                 // 2. Enviar pergunta a todos
                 broadcast(new Msg(Msg.Type.NEW_QUESTION, q));
 
-                // 3. BLOQUEAR: Esperar 30 segundos ou até todos responderem
+                // 3. BLOQUEAR: Esperar 10 segundos ou até todos responderem
                 System.out.println("À espera de respostas...");
-                currentLatch.await(30000); 
+                currentLatch.startTimer(); 
                 System.out.println("Fim do tempo ou todos responderam.");
 
                 // 4. (Opcional) Enviar placar atualizado aqui
@@ -95,7 +96,7 @@ public class Server {
                 gameState.nextQuestion();
                 
                 // Pequena pausa entre perguntas
-                Thread.sleep(3000);
+                Thread.sleep(TEMPO_ESPERA);
             }
 
             System.out.println("Jogo Terminado. A calcular pontuações...");
