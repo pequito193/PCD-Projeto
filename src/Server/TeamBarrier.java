@@ -15,9 +15,9 @@ public class TeamBarrier {
     // Variável para saber se o tempo acabou (o teu colega vai precisar disto)
     private boolean timeExpired = false;
 
-    public TeamBarrier(int teamSize) {
-        this.totalMembers = teamSize;
-        this.count = teamSize;
+    public TeamBarrier(int PlayerSize) {
+        this.totalMembers = PlayerSize;
+        this.count = PlayerSize;
     }
 
     // Chamado pelo DealWithClient quando recebe uma resposta
