@@ -5,5 +5,6 @@
 
 # Comandos
 
+- npm run compile
 - npm run server
 - npm run client -- [EQUIPA] [JOGADOR]
