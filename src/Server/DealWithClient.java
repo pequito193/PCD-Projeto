@@ -11,12 +11,22 @@ public class DealWithClient extends Thread {
     private ObjectOutputStream out;
     private ObjectInputStream in;
     private Server server;
-    private String username; // Nome do jogador
+    private String username;
+    private String gameId; // NOVO
     private boolean lastAnswerCorrect = false;
 
     public DealWithClient(Socket socket, Server server) {
         this.socket = socket;
         this.server = server;
+    }
+
+    // Métodos de acesso
+    public String getUsername() {
+        return username;
+    }
+
+    public String getGameId() {
+        return gameId;
     }
 
     @Override
@@ -25,21 +35,80 @@ public class DealWithClient extends Thread {
             out = new ObjectOutputStream(socket.getOutputStream());
             in = new ObjectInputStream(socket.getInputStream());
 
+            Object received = in.readObject();
+            if (received instanceof Msg) {
+                Msg message = (Msg) received;
+
+                if (message.type != Msg.Type.LOGIN) {
+                    send(new Msg(Msg.Type.LOGIN_ERROR, "Protocolo inválido: Primeira mensagem não é LOGIN."));
+                    closeConnection();
+                    return;
+                }
+
+                if (!handleLogin(message)) {
+                    return;
+                }
+            }
+
+            // Loop principal após login bem-sucedido
             while (true) {
-                Object received = in.readObject();
+                received = in.readObject();
                 if (received instanceof Msg) {
                     Msg message = (Msg) received;
                     handleMessage(message);
                 }
             }
         } catch (Exception e) {
-            System.out.println("Cliente desconectado: " + username);
+            if (!socket.isClosed()) {
+                System.out.println("Cliente desconectado: " + (username != null ? username : "N/A"));
+            }
+            // Remove da lista de clientes do jogo correspondente
             server.removeClient(this);
+            closeConnection();
         }
+    }
+
+    // Lógica de tratamento de LOGIN: Espera "GameID|TeamID|Username" no content
+    private boolean handleLogin(Msg msg) throws Exception {
+        String content = (String) msg.content;
+        // Usa \\| para escapar o pipe, pois é um caractere especial em regex
+        String[] parts = content.split("\\|");
+
+        if (parts.length < 3) {
+            send(new Msg(Msg.Type.LOGIN_ERROR, "Formato de login inválido. Uso: <Jogo>|<Equipa>|<Username>"));
+            closeConnection();
+            return false;
+        }
+
+        String attemptedGameId = parts[0];
+        String teamId = parts[1];
+        String attemptedUsername = parts[2];
+
+        // 1. Verificar se o username já está em uso (em qualquer jogo)
+        if (server.isUsernameTaken(attemptedUsername)) {
+            System.out.println("Login Rejeitado: Username '" + attemptedUsername + "' já em uso.");
+            send(new Msg(Msg.Type.LOGIN_ERROR, "Username já em uso."));
+            closeConnection();
+            return false;
+        }
+
+        // 2. Armazena o Game ID e Username
+        this.username = attemptedUsername;
+        this.gameId = attemptedGameId;
+
+        // 3. Avisa o servidor. O servidor verifica se o jogo existe e está cheio, e envia LOGIN_OK ou LOGIN_ERROR/fecha a conexão.
+        server.onClientLoggedIn(this, attemptedGameId);
+
+        // Se onClientLoggedIn falhar (jogo cheio/não existe), já fechou a conexão,
+        // mas aqui precisamos de garantir que não continua no run() loop.
+        if (socket.isClosed()) return false;
+
+        return true;
     }
 
     public void send(Msg msg) {
         try {
+            if (socket.isClosed()) return;
             out.writeObject(msg);
             out.reset();
         } catch (Exception e) {
@@ -47,69 +116,62 @@ public class DealWithClient extends Thread {
         }
     }
 
+    public void closeConnection() {
+        try {
+            if (in != null) in.close();
+            if (out != null) out.close();
+            if (socket != null && !socket.isClosed()) socket.close();
+        } catch (Exception e) {
+            // Ignorar
+        }
+    }
+
     private void handleMessage(Msg msg) {
         try {
-            switch (msg.type) {
-                case LOGIN:
-                    this.username = (String) msg.content;
-                    System.out.println("Login recebido: " + username);
-                    // Responde OK
-                    out.writeObject(new Msg(Msg.Type.LOGIN_OK, "Bem-vindo " + username));
-                    break;
+            // Garante que o Game ID está definido e o jogo não terminou
+            if (gameId == null || server.getGameState(gameId) == null) return;
 
+            switch (msg.type) {
                 case SEND_ANSWER:
-                    // 1. Verificar se o jogo está ativo e a pergunta existe
-                    Question currentQ = server.getGameState().getCurrentQuestion();
+                    // Acesso ao GameState via Game ID
+                    Question currentQ = server.getGameState(gameId).getCurrentQuestion();
                     if (currentQ == null) return;
 
-                    // 2. Ler a resposta do cliente (índice da opção)
                     int answerIndex = (int) msg.content;
-
-                    // 3. Verificar se acertou (comparar com o índice correto do JSON)
-                    // Guardamos na variável global para o Servidor consultar nas rondas de equipa
                     this.lastAnswerCorrect = (answerIndex == currentQ.getCorrect());
 
-                    if (server.isTeamRound()) {
+                    if (server.isTeamRound(gameId)) {
                         // --- MODO EQUIPA ---
-                        // Nas rondas de equipa, NÃO calculamos pontos aqui.
-                        // Apenas registamos que acabámos e esperamos na barreira.
-                        // A pontuação será calculada pelo Servidor quando a barreira desbloquear. [cite: 75]
-        
-                        TeamBarrier barrier = server.getCurrentBarrier();
+                        TeamBarrier barrier = server.getCurrentBarrier(gameId);
                         if (barrier != null) {
-                            barrier.playerFinished(); // Avisa a barreira que este jogador já respondeu
-                
+                            barrier.playerFinished();
+
                             String status = this.lastAnswerCorrect ? "CERTO (aguarda equipa)" : "ERRADO (aguarda equipa)";
-                            System.out.println("Equipa: Jogador " + username + " respondeu: " + status);
+                            System.out.println("Jogo " + gameId + " | Equipa: Jogador " + username + " respondeu: " + status);
                         }
                     } else {
                         // --- MODO INDIVIDUAL ---
-                        // Nas rondas individuais, calculamos logo os pontos com bónus de rapidez.
-        
-                        ModifiedCountDownLatch latch = server.getCurrentLatch();
+                        ModifiedCountDownLatch latch = server.getCurrentLatch(gameId);
                         if (latch != null) {
-                            // O countdown devolve o multiplicador (2x se for rápido, 1x normal) [cite: 78]
                             int bonus = latch.countDown();
 
                             if (this.lastAnswerCorrect) {
-                                // Calcula pontos: Base * Bónus
                                 int points = currentQ.getPoints() * bonus;
-                
-                                // Adiciona imediatamente aos pontos da equipa
-                                int myTeamId = server.getTeamIdForPlayer(this);
-                
-                                // Sincronizar porque várias threads podem escrever no GameState ao mesmo tempo
-                                synchronized (server.getGameState()) {
-                                        server.getGameState().addPointsToTeam(myTeamId, points);
+
+                                // Acesso ao GameState e cálculo da equipa com Game ID
+                                int myTeamId = server.getTeamIdForPlayer(this, gameId);
+
+                                synchronized (server.getGameState(gameId)) {
+                                    server.getGameState(gameId).addPointsToTeam(myTeamId, points);
                                 }
-                
-                                System.out.println("Individual: " + username + " ganhou " + points + " pontos (Bónus: " + bonus + ")");
+
+                                System.out.println("Jogo " + gameId + " | Individual: " + username + " ganhou " + points + " pontos (Bónus: " + bonus + ")");
                             } else {
-                                System.out.println("Individual: " + username + " errou.");
+                                System.out.println("Jogo " + gameId + " | Individual: " + username + " errou.");
                             }
                         }
                     }
-                break;
+                    break;
 
                 default:
                     System.out.println("Mensagem desconhecida: " + msg.type);
@@ -120,6 +182,6 @@ public class DealWithClient extends Thread {
     }
 
     public boolean isLastAnswerCorrect() {
-    return lastAnswerCorrect;
-}
+        return lastAnswerCorrect;
+    }
 }

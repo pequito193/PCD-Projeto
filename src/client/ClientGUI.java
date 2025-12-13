@@ -13,24 +13,27 @@ public class ClientGUI {
     private JFrame frame;
     private JLabel lblQuestion;
     private JButton[] optionButtons;
-    private JLabel lblStatus; // Substitui o lblScore para mensagens gerais
+    private JLabel lblStatus;
 
     private Socket socket;
     private ObjectOutputStream out;
     private ObjectInputStream in;
-    
+
     private String username;
     private String teamId;
+    private String gameId; // NOVO
 
-    public ClientGUI(String serverAddress, int serverPort, String username, String teamId) {
+    public ClientGUI(String serverAddress, int serverPort, String gameId, String teamId, String username) {
         this.username = username;
         this.teamId = teamId;
+        this.gameId = gameId; // Armazenar Game ID
         createAndShowGUI();
         connectToServer(serverAddress, serverPort);
     }
 
     private void createAndShowGUI() {
-        frame = new JFrame("IsKahoot - " + username + " (Equipa " + teamId + ")");
+        // Incluir Game ID no título
+        frame = new JFrame("IsKahoot - " + username + " (Jogo " + gameId + " | Equipa " + teamId + ")");
         frame.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
         frame.setSize(600, 400);
         frame.setLayout(new BorderLayout());
@@ -65,13 +68,15 @@ public class ClientGUI {
             out = new ObjectOutputStream(socket.getOutputStream());
             in = new ObjectInputStream(socket.getInputStream());
 
-            // Envia LOGIN com o Username
-            out.writeObject(new Msg(Msg.Type.LOGIN, username));
+            // Envia LOGIN concatenado: GameID|TeamID|Username
+            // Este formato permite ao servidor extrair todos os dados necessários.
+            String loginContent = gameId + "|" + teamId + "|" + username;
+            out.writeObject(new Msg(Msg.Type.LOGIN, loginContent));
 
             new Thread(new ServerListener()).start();
 
         } catch (Exception e) {
-            JOptionPane.showMessageDialog(frame, "Erro: " + e.getMessage());
+            JOptionPane.showMessageDialog(frame, "Erro de Conexão: " + e.getMessage());
             System.exit(1);
         }
     }
@@ -79,7 +84,7 @@ public class ClientGUI {
     private void submitAnswer(int optionIdx) {
         try {
             out.writeObject(new Msg(Msg.Type.SEND_ANSWER, optionIdx));
-            
+
             // Bloqueia botões após responder
             for (JButton b : optionButtons) b.setEnabled(false);
             lblStatus.setText("Resposta enviada!");
@@ -107,14 +112,19 @@ public class ClientGUI {
     private void processMessage(Msg msg) {
         switch (msg.type) {
             case LOGIN_OK:
-                lblQuestion.setText("Login OK! À espera que o jogo comece...");
+                lblQuestion.setText("Login OK! À espera que o jogo (" + gameId + ") comece...");
+                break;
+
+            case LOGIN_ERROR:
+                JOptionPane.showMessageDialog(frame, "Erro de Login: " + (String) msg.content);
+                System.exit(1);
                 break;
 
             case NEW_QUESTION:
                 if (msg.content instanceof Question) {
                     Question q = (Question) msg.content;
                     lblQuestion.setText("<html><div style='text-align: center;'>" + q.getQuestion() + "</div></html>");
-                    
+
                     List<String> opts = q.getOptions();
                     for (int i = 0; i < 4; i++) {
                         if (i < opts.size()) {
@@ -128,7 +138,12 @@ public class ClientGUI {
                     lblStatus.setText("Responde rápido!");
                 }
                 break;
-                
+
+            case UPDATE_SCORE:
+                lblStatus.setText((String) msg.content);
+                lblQuestion.setText("À espera da próxima pergunta...");
+                break;
+
             case GAME_OVER:
                 lblQuestion.setText("FIM DO JOGO!");
                 lblStatus.setText((String) msg.content);
@@ -138,20 +153,20 @@ public class ClientGUI {
     }
 
     public static void main(String[] args) {
-        // Agora verificamos os argumentos conforme o enunciado
+        // Agora precisamos de 5 argumentos: <IP> <PORT> <JOGO> <EQUIPA> <USERNAME>
         if (args.length < 5) {
             System.out.println("Uso correto: java client.ClientGUI <IP> <PORT> <JOGO> <EQUIPA> <USERNAME>");
-            // Para facilitar os testes no IDE, podes descomentar a linha abaixo se não quiseres passar args sempre:
-             SwingUtilities.invokeLater(() -> new ClientGUI("localhost", 12345, "Player1", "EqA"));
+            // Exemplo de teste (código 'TEST')
+            SwingUtilities.invokeLater(() -> new ClientGUI("localhost", 12345, "TEST", "EqA", "Player1"));
             // return;
         } else {
             String ip = args[0];
             int port = Integer.parseInt(args[1]);
-            // String gameId = args[2]; // Ainda não usado no protocolo simples
+            String gameId = args[2]; // Terceiro argumento é o código do jogo
             String teamId = args[3];
             String username = args[4];
 
-            SwingUtilities.invokeLater(() -> new ClientGUI(ip, port, username, teamId));
+            SwingUtilities.invokeLater(() -> new ClientGUI(ip, port, gameId, teamId, username));
         }
     }
 }
