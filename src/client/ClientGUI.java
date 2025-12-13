@@ -18,7 +18,7 @@ public class ClientGUI {
     private Socket socket;
     private ObjectOutputStream out;
     private ObjectInputStream in;
-    
+
     private String username;
     private String teamId;
 
@@ -79,7 +79,7 @@ public class ClientGUI {
     private void submitAnswer(int optionIdx) {
         try {
             out.writeObject(new Msg(Msg.Type.SEND_ANSWER, optionIdx));
-            
+
             // Bloqueia botões após responder
             for (JButton b : optionButtons) b.setEnabled(false);
             lblStatus.setText("Resposta enviada!");
@@ -99,6 +99,8 @@ public class ClientGUI {
                     }
                 }
             } catch (Exception e) {
+                // A thread termina quando a conexão fecha.
+                // Mensagem de desconexão é opcional, mas útil para debug.
                 System.out.println("Desconectado do servidor.");
             }
         }
@@ -109,12 +111,17 @@ public class ClientGUI {
             case LOGIN_OK:
                 lblQuestion.setText("Login OK! À espera que o jogo comece...");
                 break;
+                
+            case LOGIN_ERROR:
+                JOptionPane.showMessageDialog(frame, "Erro de Login: " + (String) msg.content);
+                System.exit(1);
+                break;
 
             case NEW_QUESTION:
                 if (msg.content instanceof Question) {
                     Question q = (Question) msg.content;
                     lblQuestion.setText("<html><div style='text-align: center;'>" + q.getQuestion() + "</div></html>");
-                    
+
                     List<String> opts = q.getOptions();
                     for (int i = 0; i < 4; i++) {
                         if (i < opts.size()) {
@@ -129,6 +136,11 @@ public class ClientGUI {
                 }
                 break;
                 
+            case UPDATE_SCORE:
+                lblStatus.setText((String) msg.content);
+                lblQuestion.setText("À espera da próxima pergunta...");
+                break;
+
             case GAME_OVER:
                 lblQuestion.setText("FIM DO JOGO!");
                 lblStatus.setText((String) msg.content);
@@ -142,7 +154,7 @@ public class ClientGUI {
         if (args.length < 5) {
             System.out.println("Uso correto: java client.ClientGUI <IP> <PORT> <JOGO> <EQUIPA> <USERNAME>");
             // Para facilitar os testes no IDE, podes descomentar a linha abaixo se não quiseres passar args sempre:
-             SwingUtilities.invokeLater(() -> new ClientGUI("localhost", 12345, "Player1", "EqA"));
+            SwingUtilities.invokeLater(() -> new ClientGUI("localhost", 12345, "Player1", "EqA"));
             // return;
         } else {
             String ip = args[0];
