@@ -4,6 +4,6 @@
   "scripts": {
     "compile": "javac -cp \"lib/gson-2.10.1.jar;src\" src/common/*.java src/model/*.java src/utils/*.java src/Server/*.java src/client/*.java",
     "server": "java -cp \"lib/gson-2.10.1.jar;src\" Server.Server",
-    "client": "node -e \"const [team, player] = process.argv.slice(1); const { execSync } = require('child_process'); execSync(`java -cp \\\"lib/gson-2.10.1.jar;src\\\" client.ClientGUI localhost 12345 Jogo1 ${team} ${player}`, { stdio: 'inherit' });\""
+    "client": "node -e \"const userArgs = process.argv.slice(1); const [gameId, teamId, username] = userArgs; const { execSync } = require('child_process'); execSync(`java -cp \\\"lib/gson-2.10.1.jar;src\\\" client.ClientGUI localhost 12345 ${gameId} ${teamId} ${username}`, { stdio: 'inherit' });\""
   }
 }

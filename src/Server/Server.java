@@ -10,29 +10,51 @@ import java.net.ServerSocket;
 import java.net.Socket;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.stream.Collectors;
+import java.util.Map;
+import java.util.HashMap;
+import java.util.Random;
 
 public class Server {
     private static final int PORT = 12345;
     private static final int TEMPO_ESPERA = 3000;     // 3s
-    private GameState gameState;
-    private final List<DealWithClient> clients = new ArrayList<>();
-    private ModifiedCountDownLatch currentLatch;
-    private TeamBarrier currentBarrier;
-    private boolean isTeamRound = false;
-    private int numTeamsExpected = 0;
-    private int playersPerTeamExpected = 0;
-    private boolean gameConfigured = false; // Só aceita conexões se o jogo estiver criado
+
+    // --- NOVO: Estrutura para jogos ativos ---
+    private final Map<String, GameInfo> activeGames = new HashMap<>();
+    private Quiz defaultQuiz; // Armazena o quiz carregado do JSON
+
+    // Classe interna para gerir o estado de cada jogo
+    private class GameInfo {
+        final String gameId;
+        final int numTeamsExpected;
+        final int playersPerTeamExpected;
+        final GameState gameState;
+        final List<DealWithClient> clients = new ArrayList<>();
+
+        // Concurrency components for the active round (only one per game)
+        ModifiedCountDownLatch currentLatch;
+        TeamBarrier currentBarrier;
+        boolean isTeamRound = false;
+
+        GameInfo(String gameId, int numTeams, int playersPerTeam, Quiz quiz) {
+            this.gameId = gameId;
+            this.numTeamsExpected = numTeams;
+            this.playersPerTeamExpected = playersPerTeam;
+            this.gameState = new GameState(quiz, numTeams);
+        }
+
+        int getTotalPlayersNeeded() {
+            return numTeamsExpected * playersPerTeamExpected;
+        }
+    }
+    // ----------------------------------------
 
 
     public Server(String jsonPath) {
         try {
             JsonLoader loader = new JsonLoader(jsonPath);
-            // Assume que existe pelo menos um quiz
-            Quiz quiz = loader.getQuizzes().get(0);
-            // Inicializa com 2 equipas (valor fixo para teste, podes mudar depois)
-            this.gameState = new GameState(quiz, 2);
-            System.out.println("Jogo carregado: " + quiz.getName());
+            // Carregar o quiz uma vez
+            this.defaultQuiz = loader.getQuizzes().get(0);
+            System.out.println("Quiz carregado: " + defaultQuiz.getName());
 
             startConnectionLoop();
 
@@ -41,11 +63,27 @@ public class Server {
         }
     }
 
+    // Gerador simples de códigos (4 letras maiúsculas)
+    private String generateUniqueGameCode() {
+        Random rnd = new Random();
+        StringBuilder sb = new StringBuilder();
+        // A geração do código é feita até ser único na lista de jogos ativos
+        synchronized (activeGames) {
+            do {
+                sb.setLength(0);
+                for (int i = 0; i < 4; i++) {
+                    sb.append((char) ('A' + rnd.nextInt(26)));
+                }
+            } while (activeGames.containsKey(sb.toString()));
+        }
+        return sb.toString();
+    }
+
     public void runTUI() {
         java.util.Scanner scanner = new java.util.Scanner(System.in);
         System.out.println("Servidor pronto. Comandos disponíveis:");
         System.out.println(" > new <nEquipas> <nJogadoresPorEquipa>");
-        System.out.println(" > list (vê jogadores ligados)");
+        System.out.println(" > list (vê jogos/jogadores ligados)");
 
         while (true) {
             String line = scanner.nextLine();
@@ -53,24 +91,46 @@ public class Server {
 
             if (parts[0].equalsIgnoreCase("new") && parts.length == 3) {
                 try {
-                    this.numTeamsExpected = Integer.parseInt(parts[1]);
-                    this.playersPerTeamExpected = Integer.parseInt(parts[2]);
+                    int numTeams = Integer.parseInt(parts[1]);
+                    int playersPerTeam = Integer.parseInt(parts[2]);
 
-                    // Reiniciar estado se necessário
-                    this.clients.clear();
-                    // (Aqui poderias carregar um novo gameState se quisesses suportar múltiplos jogos)
-                    this.gameState = new GameState(gameState.getQuiz(), numTeamsExpected);
+                    if (numTeams <= 0 || playersPerTeam <= 0) {
+                        System.out.println("Erro: Os números de equipas/jogadores têm de ser positivos.");
+                        continue;
+                    }
 
-                    this.gameConfigured = true;
-                    System.out.println("Novo jogo configurado! À espera de " + (numTeamsExpected * playersPerTeamExpected) + " jogadores.");
-                    System.out.println("Código do jogo: Jogo1 (Fixo para este teste)");
+                    String gameCode = generateUniqueGameCode();
+
+                    // Cria e regista o novo jogo
+                    synchronized (activeGames) {
+                        GameInfo newGame = new GameInfo(gameCode, numTeams, playersPerTeam, defaultQuiz);
+                        activeGames.put(gameCode, newGame);
+                    }
+
+                    System.out.println("Novo jogo configurado!");
+                    System.out.println("Código do jogo: " + gameCode);
+                    System.out.println("À espera de " + (numTeams * playersPerTeam) + " jogadores.");
 
                 } catch (NumberFormatException e) {
                     System.out.println("Erro: Os argumentos têm de ser números inteiros.");
                 }
             }
             else if (parts[0].equalsIgnoreCase("list")) {
-                System.out.println("Jogadores ligados: " + clients.size());
+                synchronized (activeGames) {
+                    if (activeGames.isEmpty()) {
+                        System.out.println("Nenhum jogo ativo.");
+                        continue;
+                    }
+                    System.out.println("--- JOGOS ATIVOS ---");
+                    for (GameInfo game : activeGames.values()) {
+                        System.out.printf("JOGO %s: %d/%d jogadores ligados. (Status: %s)\n",
+                                game.gameId,
+                                game.clients.size(),
+                                game.getTotalPlayersNeeded(),
+                                game.clients.size() < game.getTotalPlayersNeeded() ? "À espera" : "A decorrer"
+                        );
+                    }
+                }
             }
             else {
                 System.out.println("Comando inválido.");
@@ -81,201 +141,201 @@ public class Server {
     private void startConnectionLoop() {
         new Thread(() -> {
             try (ServerSocket serverSocket = new ServerSocket(PORT)) {
-                // ...
                 while (true) {
                     Socket socket = serverSocket.accept();
 
-                    // SÓ ACEITA SE HOUVER JOGO CONFIGURADO
-                    if (!gameConfigured) {
-                        // Opcional: Enviar mensagem de erro ao socket e fechar
-                        socket.close();
-                        continue;
-                    }
-
+                    // A thread DealWithClient gere o login e as verificações do Game ID.
                     DealWithClient client = new DealWithClient(socket, this);
-                    // O cliente só é adicionado à lista e a contagem é verificada APÓS o login
                     client.start();
-
                 }
             } catch (Exception e) { e.printStackTrace(); }
         }).start();
     }
 
-    // NOVO: Chamado por DealWithClient APÓS um login bem-sucedido
-    public void onClientLoggedIn(DealWithClient client) {
-        int totalPlayersNeeded = numTeamsExpected * playersPerTeamExpected;
+    // Chamado por DealWithClient APÓS um login bem-sucedido.
+    public void onClientLoggedIn(DealWithClient client, String gameId) {
+        GameInfo game;
 
-        synchronized (clients) {
-            // Adicionar cliente APENAS se o login foi bem-sucedido.
-            clients.add(client);
+        synchronized (activeGames) {
+            game = activeGames.get(gameId);
+        }
 
-            System.out.println("Jogadores: " + clients.size() + "/" + totalPlayersNeeded);
+        // 1. Verificar se o jogo existe
+        if (game == null) {
+            client.send(new Msg(Msg.Type.LOGIN_ERROR, "Jogo " + gameId + " não encontrado."));
+            client.closeConnection();
+            return;
+        }
 
-            // ARRANCAR BASEADO NA CONFIGURAÇÃO DA TUI
-            if (clients.size() == totalPlayersNeeded) {
-                // Impedir novas conexões para este jogo?
-                this.gameConfigured = false; // Fecha a porta a novos
-                new Thread(this::startGame).start();
+        synchronized (game.clients) {
+            // 2. Verificar se o jogo já está cheio (a decorrer)
+            if (game.clients.size() >= game.getTotalPlayersNeeded()) {
+                client.send(new Msg(Msg.Type.LOGIN_ERROR, "Jogo " + gameId + " está cheio ou a decorrer."));
+                client.closeConnection();
+                return;
+            }
+
+            // Login OK: Adicionar cliente à lista e responder OK
+            game.clients.add(client);
+            client.send(new Msg(Msg.Type.LOGIN_OK, "Bem-vindo " + client.getUsername()));
+
+            System.out.println("JOGO " + gameId + " | Jogadores: " + game.clients.size() + "/" + game.getTotalPlayersNeeded());
+
+            // ARRANCAR O JOGO
+            if (game.clients.size() == game.getTotalPlayersNeeded()) {
+                System.out.println("JOGO " + gameId + " COMPLETO. A INICIAR...");
+                new Thread(() -> startGame(game)).start();
             }
         }
     }
 
-    private void startGame() {
+    // Este método agora recebe um objeto GameInfo
+    private void startGame(GameInfo game) {
         try {
-            System.out.println("O jogo vai começar em 3 segundos...");
+            System.out.println("O jogo " + game.gameId + " vai começar em 3 segundos...");
             Thread.sleep(TEMPO_ESPERA);
 
-            List<Question> questions = gameState.getQuiz().getQuestions();
+            List<Question> questions = game.gameState.getQuiz().getQuestions();
 
             for (int i = 0; i < questions.size(); i++) {
                 Question q = questions.get(i);
 
-                // Regra do Enunciado: Alternar entre Individual e Equipa
-                // Índice Par (0, 2...) = Individual
-                // Índice Ímpar (1, 3...) = Equipa
-                this.isTeamRound = (i % 2 != 0);
+                game.isTeamRound = (i % 2 != 0);
 
-                System.out.println("\n--- PERGUNTA " + (i + 1) + " (" + (isTeamRound ? "EQUIPA" : "INDIVIDUAL") + ") ---");
+                System.out.println("\n--- PERGUNTA " + (i + 1) + " (" + (game.isTeamRound ? "EQUIPA" : "INDIVIDUAL") + ") para o JOGO " + game.gameId + " ---");
 
-                // DEBUG: Ver quantas pessoas o servidor "vê"
-                synchronized(clients) {
-                    System.out.println("Jogadores ativos: " + clients.size() + " jogadores.");
+                synchronized(game.clients) {
+                    System.out.println("Jogadores ativos: " + game.clients.size() + " jogadores.");
 
-                    if (isTeamRound) {
-                        currentLatch = null;
-                        // Usa o número de clientes APENAS os que fizeram login
-                        currentBarrier = new TeamBarrier(clients.size());
+                    if (game.isTeamRound) {
+                        game.currentLatch = null;
+                        game.currentBarrier = new TeamBarrier(game.clients.size());
                     } else {
-                        currentBarrier = null;
-                        // Usa o número de clientes APENAS os que fizeram login
-                        currentLatch = new ModifiedCountDownLatch(2, 1, 10000, clients.size());
+                        game.currentBarrier = null;
+                        game.currentLatch = new ModifiedCountDownLatch(2, 1, 10000, game.clients.size());
                     }
                 }
+
                 // 2. Enviar a pergunta a todos
-                // Podes adicionar "(EQUIPA)" ao texto da pergunta para avisar os jogadores
-                if (isTeamRound) {
-                    // Pequeno truque visual para o cliente saber que é de equipa
+                if (game.isTeamRound) {
                     Question qTeam = new Question(
                             "[EQUIPA] " + q.getQuestion(),
                             q.getPoints(),
                             q.getCorrect(),
                             q.getOptions()
                     );
-                    broadcast(new Msg(Msg.Type.NEW_QUESTION, qTeam));
+                    broadcast(game, new Msg(Msg.Type.NEW_QUESTION, qTeam));
                 } else {
-                    broadcast(new Msg(Msg.Type.NEW_QUESTION, q));
+                    broadcast(game, new Msg(Msg.Type.NEW_QUESTION, q));
                 }
 
-                // 3. BLOQUEAR: Esperar pelas respostas (10 ou 30 segundos, dependendo da implementação do Latch/Barrier)
-                // O servidor fica preso aqui até o tempo acabar ou todos responderem
-                if (isTeamRound) {
-                    System.out.println("Servidor à espera na Barreira (Modo Equipa)...");
-                    currentBarrier.await();
+                // 3. BLOQUEAR: Esperar pelas respostas
+                if (game.isTeamRound) {
+                    System.out.println("Servidor à espera na Barreira (Modo Equipa) para " + game.gameId + "...");
+                    game.currentBarrier.await();
+
                     // --- CÁLCULO DE PONTOS DE EQUIPA ---
-                    // 1. Organizar jogadores por equipa para facilitar a verificação
-                    int numTeams = gameState.getTeamScores().size();
+                    int numTeams = game.gameState.getTeamScores().size();
                     boolean[] teamAllCorrect = new boolean[numTeams];
                     boolean[] teamAtLeastOneCorrect = new boolean[numTeams];
 
-                    // Inicializar arrays
                     for(int t=0; t<numTeams; t++) {
-                        teamAllCorrect[t] = true;   // Assumimos que todos acertaram até prova em contrário
+                        teamAllCorrect[t] = true;
                         teamAtLeastOneCorrect[t] = false;
                     }
-                    synchronized(clients) {
-                        for (DealWithClient client : clients) {
-                            int teamId = getTeamIdForPlayer(client);
+
+                    synchronized(game.clients) {
+                        for (DealWithClient client : game.clients) {
+                            int teamId = getTeamIdForPlayer(client, game.gameId);
                             boolean correct = client.isLastAnswerCorrect();
 
                             if (correct) {
                                 teamAtLeastOneCorrect[teamId] = true;
                             } else {
-                                teamAllCorrect[teamId] = false; // Um falhou, logo a equipa não tem bónus
+                                teamAllCorrect[teamId] = false;
                             }
                         }
                     }
-                    // 2. Distribuir pontos
+
                     int basePoints = q.getPoints();
 
                     for (int t = 0; t < numTeams; t++) {
                         int pointsToAdd = 0;
-
                         if (teamAllCorrect[t]) {
-                            // Todos acertaram: DUPLA COTAÇÃO
                             pointsToAdd = basePoints * 2;
-                            System.out.println("Equipa " + (t+1) + ": TODOS acertaram! (Pontos x2: " + pointsToAdd + ")");
+                            System.out.println("Equipa " + (t+1) + " do jogo " + game.gameId + ": TODOS acertaram! (Pontos x2: " + pointsToAdd + ")");
                         } else if (teamAtLeastOneCorrect[t]) {
-                            // Alguém falhou, mas pelo menos um acertou: COTAÇÃO NORMAL (sem bónus)
                             pointsToAdd = basePoints;
-                            System.out.println("Equipa " + (t+1) + ": Acertaram parcialmente. (Pontos normais: " + pointsToAdd + ")");
+                            System.out.println("Equipa " + (t+1) + " do jogo " + game.gameId + ": Acertaram parcialmente. (Pontos normais: " + pointsToAdd + ")");
                         } else {
-                            System.out.println("Equipa " + (t+1) + ": Ninguém acertou.");
+                            System.out.println("Equipa " + (t+1) + " do jogo " + game.gameId + ": Ninguém acertou.");
                         }
 
                         if (pointsToAdd > 0) {
-                            // Sincronizar ao modificar o GameState
-                            synchronized (gameState) {
-                                gameState.addPointsToTeam(t, pointsToAdd);
+                            synchronized (game.gameState) {
+                                game.gameState.addPointsToTeam(t, pointsToAdd);
                             }
                         }
                     }
-                    System.out.println("Barreira libertada (ou tempo esgotou).");
+                    System.out.println("Barreira libertada (ou tempo esgotou) para " + game.gameId + ".");
                 } else {
-                    System.out.println("Servidor à espera no Latch (Modo Individual)...");
-                    currentLatch.await();
-                    System.out.println("Latch libertado (ou tempo esgotou).");
+                    System.out.println("Servidor à espera no Latch (Modo Individual) para " + game.gameId + "...");
+                    game.currentLatch.await();
+                    System.out.println("Latch libertado (ou tempo esgotou) para " + game.gameId + ".");
                 }
 
                 // 4. Avanca o índice para a próxima pergunta
-                gameState.nextQuestion();
+                game.gameState.nextQuestion();
 
-                // 5. Enviar Placar Intermédio se houver próxima pergunta
+                // 5. Enviar Placar Intermédio
                 if (i < questions.size() - 1) {
-                    System.out.println("A enviar placar intermédio...");
-                    broadcast(new Msg(Msg.Type.UPDATE_SCORE, getScoreSummary()));
+                    System.out.println("A enviar placar intermédio para " + game.gameId + "...");
+                    broadcast(game, new Msg(Msg.Type.UPDATE_SCORE, getScoreSummary(game)));
 
-                    // Pequena pausa entre perguntas
                     Thread.sleep(TEMPO_ESPERA);
                 } else {
-                    // Pausa após a última pergunta, antes de enviar GAME_OVER
                     Thread.sleep(TEMPO_ESPERA);
                 }
             }
 
             // --- FIM DO JOGO ---
-            System.out.println("Todas as perguntas respondidas. A enviar classificações...");
+            System.out.println("JOGO " + game.gameId + " TERMINADO.");
 
-            // Construir o Placar Final em HTML para aparecer bonito na GUI
-            StringBuilder sb = new StringBuilder("<html><div style='text-align: center;'><h1>FIM DO JOGO!</h1>");
-            List<Integer> scores = gameState.getTeamScores();
+            // Placar Final
+            StringBuilder sb = new StringBuilder("<html><div style='text-align: center;'><h1>FIM DO JOGO! (ID: " + game.gameId + ")</h1>");
+            List<Integer> scores = game.gameState.getTeamScores();
 
             sb.append("<table border='1' style='margin: auto;'><tr><th>Equipa</th><th>Pontos</th></tr>");
             for (int t = 0; t < scores.size(); t++) {
-                sb.append("<tr><td>Equipa ").append(t + 1).append("</td>"); // Usar t+1 para ser 1-based
+                sb.append("<tr><td>Equipa ").append(t + 1).append("</td>");
                 sb.append("<td>").append(scores.get(t)).append("</td></tr>");
             }
             sb.append("</table></div></html>");
 
             // Envia mensagem final
-            broadcast(new Msg(Msg.Type.GAME_OVER, sb.toString()));
+            broadcast(game, new Msg(Msg.Type.GAME_OVER, sb.toString()));
 
-            // Fechar conexões para garantir encerramento das threads DealWithClient
-            closeAllClientConnections();
+            // Fechar conexões e remover o jogo
+            closeAllClientConnections(game.gameId);
+
+            synchronized (activeGames) {
+                activeGames.remove(game.gameId);
+                System.out.println("Jogo " + game.gameId + " removido da lista de ativos.");
+            }
 
         } catch (InterruptedException e) {
             e.printStackTrace();
         }
     }
 
-    // NOVO: Gera a string HTML com o placar atual para UPDATE_SCORE
-    public String getScoreSummary() {
-        // Criar uma representação HTML do placar (melhor para a GUI do cliente)
-        StringBuilder sb = new StringBuilder("<html><div style='text-align: center;'><h3>Placar Atual (Pergunta " + (gameState.getCurrentIndex() + 1) + "/" + gameState.getTotalQuestions() + ")</h3>");
-        List<Integer> scores = gameState.getTeamScores();
+    // Gera a string HTML com o placar atual para UPDATE_SCORE
+    public String getScoreSummary(GameInfo game) {
+        StringBuilder sb = new StringBuilder("<html><div style='text-align: center;'><h3>Placar Atual (Pergunta " + (game.gameState.getCurrentIndex() + 1) + "/" + game.gameState.getTotalQuestions() + ")</h3>");
+        List<Integer> scores = game.gameState.getTeamScores();
 
         sb.append("<table border='1' style='margin: auto;'><tr><th>Equipa</th><th>Pontos</th></tr>");
         for (int t = 0; t < scores.size(); t++) {
-            sb.append("<tr><td>Equipa ").append(t + 1).append("</td>"); // Usar t+1 para ser 1-based
+            sb.append("<tr><td>Equipa ").append(t + 1).append("</td>");
             sb.append("<td>").append(scores.get(t)).append("</td></tr>");
         }
         sb.append("</table></div></html>");
@@ -283,87 +343,118 @@ public class Server {
         return sb.toString();
     }
 
-    // NOVO: Verifica se o username já está em uso
+    // Procura o username em TODOS os jogos ativos
     public boolean isUsernameTaken(String username) {
-        synchronized (clients) {
-            for (DealWithClient client : clients) {
-                // Se o username do cliente está definido e coincide com o que está a ser tentado
-                if (client.getUsername() != null && client.getUsername().equalsIgnoreCase(username)) {
-                    return true;
+        synchronized (activeGames) {
+            for (GameInfo game : activeGames.values()) {
+                synchronized (game.clients) {
+                    for (DealWithClient client : game.clients) {
+                        if (client.getUsername() != null && client.getUsername().equalsIgnoreCase(username)) {
+                            return true;
+                        }
+                    }
                 }
             }
             return false;
         }
     }
 
-    public void broadcast(Msg msg) {
-        synchronized (clients) {
-            // Cria uma cópia para evitar ConcurrentModificationException durante a iteração
-            List<DealWithClient> activeClients = new ArrayList<>(clients);
+    // Broadcast por Jogo
+    public void broadcast(GameInfo game, Msg msg) {
+        synchronized (game.clients) {
+            List<DealWithClient> activeClients = new ArrayList<>(game.clients);
             for (DealWithClient client : activeClients) {
                 client.send(msg);
             }
         }
     }
 
-    // NOVO: Fecha todas as conexões (para o requisito de fim de jogo)
-    public void closeAllClientConnections() {
-        synchronized (clients) {
-            // Itera sobre uma cópia, pois a lista original será modificada
-            List<DealWithClient> clientsToClose = new ArrayList<>(clients);
+    // Fecha todas as conexões para um Jogo
+    public void closeAllClientConnections(String gameId) {
+        GameInfo game;
+        synchronized (activeGames) {
+            game = activeGames.get(gameId);
+        }
+        if (game == null) return;
+
+        synchronized (game.clients) {
+            List<DealWithClient> clientsToClose = new ArrayList<>(game.clients);
             for (DealWithClient client : clientsToClose) {
                 try {
-                    client.closeConnection(); // Nova função em DealWithClient
+                    client.closeConnection();
                 } catch (Exception e) {
                     // Ignorar
                 }
             }
-            clients.clear();
+            game.clients.clear();
         }
     }
 
+    // Remove cliente de qualquer jogo
     public void removeClient(DealWithClient client) {
-        synchronized (clients) {
-            clients.remove(client);
+        String gameId = client.getGameId();
+        if (gameId == null) return;
+
+        synchronized (activeGames) {
+            GameInfo game = activeGames.get(gameId);
+            if (game != null) {
+                synchronized (game.clients) {
+                    game.clients.remove(client);
+                    System.out.println("Cliente " + client.getUsername() + " removido do JOGO " + gameId);
+                }
+            }
         }
     }
 
-    // Métodos de acesso para o DealWithClient usar
-    public ModifiedCountDownLatch getCurrentLatch() {
-        return currentLatch;
+    // Métodos de acesso que requerem o Game ID
+
+    public GameState getGameState(String gameId) {
+        synchronized (activeGames) {
+            GameInfo game = activeGames.get(gameId);
+            return game != null ? game.gameState : null;
+        }
     }
 
-    public GameState getGameState() {
-        return gameState;
+    public ModifiedCountDownLatch getCurrentLatch(String gameId) {
+        synchronized (activeGames) {
+            GameInfo game = activeGames.get(gameId);
+            return game != null ? game.currentLatch : null;
+        }
+    }
+
+    public boolean isTeamRound(String gameId) {
+        synchronized (activeGames) {
+            GameInfo game = activeGames.get(gameId);
+            return game != null && game.isTeamRound;
+        }
+    }
+
+    public TeamBarrier getCurrentBarrier(String gameId) {
+        synchronized (activeGames) {
+            GameInfo game = activeGames.get(gameId);
+            return game != null ? game.currentBarrier : null;
+        }
     }
 
     // Método auxiliar para obter ID da equipa de um jogador (lógica simplificada)
-    public int getTeamIdForPlayer(DealWithClient client) {
-        synchronized(clients) {
-            // 1. Descobrir qual é o índice deste jogador na lista (0, 1, 2, etc.)
-            int playerIndex = clients.indexOf(client);
+    public int getTeamIdForPlayer(DealWithClient client, String gameId) {
+        GameInfo game;
+        synchronized(activeGames) {
+            game = activeGames.get(gameId);
+        }
 
-            // 2. Usar o número de equipas que TU definiste no comando 'new'
-            // (Se por acaso for 0, usamos 1 para não dar erro de divisão por zero)
-            int divisor = (numTeamsExpected > 1) ? numTeamsExpected : 1;
+        if (game == null) return -1;
 
-            // 3. O resto da divisão garante que o resultado é sempre uma equipa válida
-            // Exemplo com 1 Equipa: QualquerNumero % 1 dá sempre 0.
+        synchronized(game.clients) {
+            int playerIndex = game.clients.indexOf(client);
+
+            int divisor = (game.numTeamsExpected > 1) ? game.numTeamsExpected : 1;
+
             return playerIndex % divisor;
         }
     }
 
-    public boolean isTeamRound() {
-        return isTeamRound;
-    }
-
-    public TeamBarrier getCurrentBarrier() {
-        return currentBarrier;
-    }
-
-
     public static void main(String[] args) {
-        // Certifica-te que o caminho do JSON está correto
         Server s = new Server("data/questions.json");
         s.runTUI();
     }

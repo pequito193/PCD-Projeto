@@ -11,7 +11,8 @@ public class DealWithClient extends Thread {
     private ObjectOutputStream out;
     private ObjectInputStream in;
     private Server server;
-    private String username; // Nome do jogador
+    private String username;
+    private String gameId; // NOVO
     private boolean lastAnswerCorrect = false;
 
     public DealWithClient(Socket socket, Server server) {
@@ -19,9 +20,13 @@ public class DealWithClient extends Thread {
         this.server = server;
     }
 
-    // Método de acesso para o Server verificar se o nome está ocupado
+    // Métodos de acesso
     public String getUsername() {
         return username;
+    }
+
+    public String getGameId() {
+        return gameId;
     }
 
     @Override
@@ -30,21 +35,18 @@ public class DealWithClient extends Thread {
             out = new ObjectOutputStream(socket.getOutputStream());
             in = new ObjectInputStream(socket.getInputStream());
 
-            // O cliente envia o LOGIN assim que se conecta.
-            // A primeira mensagem é tratada aqui fora do loop para validar o login antes de começar a loop
             Object received = in.readObject();
             if (received instanceof Msg) {
                 Msg message = (Msg) received;
-                // Se a primeira mensagem não for LOGIN, rejeita.
+
                 if (message.type != Msg.Type.LOGIN) {
                     send(new Msg(Msg.Type.LOGIN_ERROR, "Protocolo inválido: Primeira mensagem não é LOGIN."));
-                    closeConnection(); // Rejeita e fecha
-                    return; // Login falhou, thread termina
+                    closeConnection();
+                    return;
                 }
 
-                // Validação de Login antes de entrar no loop principal
                 if (!handleLogin(message)) {
-                    return; // Login falhou, thread termina
+                    return;
                 }
             }
 
@@ -53,42 +55,53 @@ public class DealWithClient extends Thread {
                 received = in.readObject();
                 if (received instanceof Msg) {
                     Msg message = (Msg) received;
-                    handleMessage(message); // Trata todas as mensagens exceto LOGIN
+                    handleMessage(message);
                 }
             }
         } catch (Exception e) {
-            // Se a exceção for devido a fecho de socket após login falhado, a thread termina aqui.
-            // Se for após login bem-sucedido ou a meio do jogo
             if (!socket.isClosed()) {
                 System.out.println("Cliente desconectado: " + (username != null ? username : "N/A"));
             }
-            server.removeClient(this); // Remove da lista de clientes ativos
+            // Remove da lista de clientes do jogo correspondente
+            server.removeClient(this);
             closeConnection();
         }
     }
 
-    // Lógica de tratamento de LOGIN separada para validar e rejeitar se necessário
+    // Lógica de tratamento de LOGIN: Espera "GameID|TeamID|Username" no content
     private boolean handleLogin(Msg msg) throws Exception {
-        String attemptedUsername = (String) msg.content;
+        String content = (String) msg.content;
+        // Usa \\| para escapar o pipe, pois é um caractere especial em regex
+        String[] parts = content.split("\\|");
 
-        // 1. Verificar se o username já está em uso
-        if (server.isUsernameTaken(attemptedUsername)) {
-            System.out.println("Login Rejeitado: Username '" + attemptedUsername + "' já em uso.");
-            send(new Msg(Msg.Type.LOGIN_ERROR, "Username já em uso."));
-            closeConnection(); // Fecha a socket
+        if (parts.length < 3) {
+            send(new Msg(Msg.Type.LOGIN_ERROR, "Formato de login inválido. Uso: <Jogo>|<Equipa>|<Username>"));
+            closeConnection();
             return false;
         }
 
-        // 2. Se OK, regista o username
+        String attemptedGameId = parts[0];
+        String teamId = parts[1];
+        String attemptedUsername = parts[2];
+
+        // 1. Verificar se o username já está em uso (em qualquer jogo)
+        if (server.isUsernameTaken(attemptedUsername)) {
+            System.out.println("Login Rejeitado: Username '" + attemptedUsername + "' já em uso.");
+            send(new Msg(Msg.Type.LOGIN_ERROR, "Username já em uso."));
+            closeConnection();
+            return false;
+        }
+
+        // 2. Armazena o Game ID e Username
         this.username = attemptedUsername;
-        System.out.println("Login OK: " + username);
+        this.gameId = attemptedGameId;
 
-        // 3. NOVO: Avisa o servidor que o login foi bem-sucedido. Isto adiciona o cliente à lista principal
-        // e verifica se o jogo deve começar.
-        server.onClientLoggedIn(this);
+        // 3. Avisa o servidor. O servidor verifica se o jogo existe e está cheio, e envia LOGIN_OK ou LOGIN_ERROR/fecha a conexão.
+        server.onClientLoggedIn(this, attemptedGameId);
 
-        // 4. Responde OK ao cliente
-        send(new Msg(Msg.Type.LOGIN_OK, "Bem-vindo " + username));
+        // Se onClientLoggedIn falhar (jogo cheio/não existe), já fechou a conexão,
+        // mas aqui precisamos de garantir que não continua no run() loop.
+        if (socket.isClosed()) return false;
 
         return true;
     }
@@ -103,7 +116,6 @@ public class DealWithClient extends Thread {
         }
     }
 
-    // Fecha a conexão do cliente
     public void closeConnection() {
         try {
             if (in != null) in.close();
@@ -116,60 +128,46 @@ public class DealWithClient extends Thread {
 
     private void handleMessage(Msg msg) {
         try {
-            switch (msg.type) {
-                case LOGIN:
-                    // Já tratado no handleLogin() antes do loop principal
-                    break;
+            // Garante que o Game ID está definido e o jogo não terminou
+            if (gameId == null || server.getGameState(gameId) == null) return;
 
+            switch (msg.type) {
                 case SEND_ANSWER:
-                    // 1. Verificar se o jogo está ativo e a pergunta existe
-                    Question currentQ = server.getGameState().getCurrentQuestion();
+                    // Acesso ao GameState via Game ID
+                    Question currentQ = server.getGameState(gameId).getCurrentQuestion();
                     if (currentQ == null) return;
 
-                    // 2. Ler a resposta do cliente (índice da opção)
                     int answerIndex = (int) msg.content;
-
-                    // 3. Verificar se acertou (comparar com o índice correto do JSON)
-                    // Guardamos na variável global para o Servidor consultar nas rondas de equipa
                     this.lastAnswerCorrect = (answerIndex == currentQ.getCorrect());
 
-                    if (server.isTeamRound()) {
+                    if (server.isTeamRound(gameId)) {
                         // --- MODO EQUIPA ---
-                        // Nas rondas de equipa, NÃO calculamos pontos aqui.
-                        // Apenas registamos que acabámos e esperamos na barreira.
-                        // A pontuação será calculada pelo Servidor quando a barreira desbloquear.
-
-                        TeamBarrier barrier = server.getCurrentBarrier();
+                        TeamBarrier barrier = server.getCurrentBarrier(gameId);
                         if (barrier != null) {
-                            barrier.playerFinished(); // Avisa a barreira que este jogador já respondeu
+                            barrier.playerFinished();
 
                             String status = this.lastAnswerCorrect ? "CERTO (aguarda equipa)" : "ERRADO (aguarda equipa)";
-                            System.out.println("Equipa: Jogador " + username + " respondeu: " + status);
+                            System.out.println("Jogo " + gameId + " | Equipa: Jogador " + username + " respondeu: " + status);
                         }
                     } else {
                         // --- MODO INDIVIDUAL ---
-                        // Nas rondas individuais, calculamos logo os pontos com bónus de rapidez.
-
-                        ModifiedCountDownLatch latch = server.getCurrentLatch();
+                        ModifiedCountDownLatch latch = server.getCurrentLatch(gameId);
                         if (latch != null) {
-                            // O countdown devolve o multiplicador (2x se for rápido, 1x normal)
                             int bonus = latch.countDown();
 
                             if (this.lastAnswerCorrect) {
-                                // Calcula pontos: Base * Bónus
                                 int points = currentQ.getPoints() * bonus;
 
-                                // Adiciona imediatamente aos pontos da equipa
-                                int myTeamId = server.getTeamIdForPlayer(this);
+                                // Acesso ao GameState e cálculo da equipa com Game ID
+                                int myTeamId = server.getTeamIdForPlayer(this, gameId);
 
-                                // Sincronizar porque várias threads podem escrever no GameState ao mesmo tempo
-                                synchronized (server.getGameState()) {
-                                    server.getGameState().addPointsToTeam(myTeamId, points);
+                                synchronized (server.getGameState(gameId)) {
+                                    server.getGameState(gameId).addPointsToTeam(myTeamId, points);
                                 }
 
-                                System.out.println("Individual: " + username + " ganhou " + points + " pontos (Bónus: " + bonus + ")");
+                                System.out.println("Jogo " + gameId + " | Individual: " + username + " ganhou " + points + " pontos (Bónus: " + bonus + ")");
                             } else {
-                                System.out.println("Individual: " + username + " errou.");
+                                System.out.println("Jogo " + gameId + " | Individual: " + username + " errou.");
                             }
                         }
                     }
