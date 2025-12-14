@@ -29,15 +29,11 @@ public class ModifiedCountDownLatch {
 
         return bonusFactor;
     }
-
-    // Chamado pelo Servidor para esperar pelas respostas
     public synchronized void await() throws InterruptedException {
         if (count > 0) {
             wait(waitPeriod);
 
             notifyAll();
         }
-
-        // Se acordar aqui, ou o tempo acabou ou count chegou a 0
     }
 }

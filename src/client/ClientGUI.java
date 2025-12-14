@@ -68,8 +68,7 @@ public class ClientGUI {
             out = new ObjectOutputStream(socket.getOutputStream());
             in = new ObjectInputStream(socket.getInputStream());
 
-            // Envia LOGIN concatenado: GameID|TeamID|Username
-            // Este formato permite ao servidor extrair todos os dados necessários.
+            // Envia LOGIN
             String loginContent = gameId + "|" + teamId + "|" + username;
             out.writeObject(new Msg(Msg.Type.LOGIN, loginContent));
 
@@ -87,7 +86,7 @@ public class ClientGUI {
 
             // Bloqueia botões após responder
             for (JButton b : optionButtons) b.setEnabled(false);
-            lblStatus.setText("Resposta enviada!");
+                lblStatus.setText("Resposta enviada!");
         } catch (Exception e) {
             e.printStackTrace();
         }
@@ -153,16 +152,14 @@ public class ClientGUI {
     }
 
     public static void main(String[] args) {
-        // Agora precisamos de 5 argumentos: <IP> <PORT> <JOGO> <EQUIPA> <USERNAME>
         if (args.length < 5) {
             System.out.println("Uso correto: java client.ClientGUI <IP> <PORT> <JOGO> <EQUIPA> <USERNAME>");
-            // Exemplo de teste (código 'TEST')
+            // Exemplo de teste
             SwingUtilities.invokeLater(() -> new ClientGUI("localhost", 12345, "TEST", "EqA", "Player1"));
-            // return;
         } else {
             String ip = args[0];
             int port = Integer.parseInt(args[1]);
-            String gameId = args[2]; // Terceiro argumento é o código do jogo
+            String gameId = args[2];
             String teamId = args[3];
             String username = args[4];
 

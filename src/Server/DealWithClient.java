@@ -20,7 +20,6 @@ public class DealWithClient extends Thread {
         this.server = server;
     }
 
-    // Métodos de acesso
     public String getUsername() {
         return username;
     }
@@ -50,7 +49,6 @@ public class DealWithClient extends Thread {
                 }
             }
 
-            // Loop principal após login bem-sucedido
             while (true) {
                 received = in.readObject();
                 if (received instanceof Msg) {
@@ -62,16 +60,13 @@ public class DealWithClient extends Thread {
             if (!socket.isClosed()) {
                 System.out.println("Cliente desconectado: " + (username != null ? username : "N/A"));
             }
-            // Remove da lista de clientes do jogo correspondente
             server.removeClient(this);
             closeConnection();
         }
     }
 
-    // Lógica de tratamento de LOGIN: Espera "GameID|TeamID|Username" no content
     private boolean handleLogin(Msg msg) throws Exception {
         String content = (String) msg.content;
-        // Usa \\| para escapar o pipe, pois é um caractere especial em regex
         String[] parts = content.split("\\|");
 
         if (parts.length < 3) {
@@ -84,7 +79,7 @@ public class DealWithClient extends Thread {
         String teamId = parts[1];
         String attemptedUsername = parts[2];
 
-        // 1. Verificar se o username já está em uso (em qualquer jogo)
+        // Verificar se o username já está em uso
         if (server.isUsernameTaken(attemptedUsername)) {
             System.out.println("Login Rejeitado: Username '" + attemptedUsername + "' já em uso.");
             send(new Msg(Msg.Type.LOGIN_ERROR, "Username já em uso."));
@@ -92,15 +87,13 @@ public class DealWithClient extends Thread {
             return false;
         }
 
-        // 2. Armazena o Game ID e Username
         this.username = attemptedUsername;
         this.gameId = attemptedGameId;
 
-        // 3. Avisa o servidor. O servidor verifica se o jogo existe e está cheio, e envia LOGIN_OK ou LOGIN_ERROR/fecha a conexão.
+        // Avisa o servidor. O servidor verifica se o jogo existe e está cheio, e envia LOGIN_OK ou LOGIN_ERROR e fecha a conexão.
         server.onClientLoggedIn(this, attemptedGameId);
 
-        // Se onClientLoggedIn falhar (jogo cheio/não existe), já fechou a conexão,
-        // mas aqui precisamos de garantir que não continua no run() loop.
+        // garantir que não continua no run() loop.
         if (socket.isClosed()) return false;
 
         return true;
@@ -121,19 +114,15 @@ public class DealWithClient extends Thread {
             if (in != null) in.close();
             if (out != null) out.close();
             if (socket != null && !socket.isClosed()) socket.close();
-        } catch (Exception e) {
-            // Ignorar
-        }
+        } catch (Exception e) {}
     }
 
     private void handleMessage(Msg msg) {
         try {
-            // Garante que o Game ID está definido e o jogo não terminou
             if (gameId == null || server.getGameState(gameId) == null) return;
 
             switch (msg.type) {
                 case SEND_ANSWER:
-                    // Acesso ao GameState via Game ID
                     Question currentQ = server.getGameState(gameId).getCurrentQuestion();
                     if (currentQ == null) return;
 
@@ -158,7 +147,6 @@ public class DealWithClient extends Thread {
                             if (this.lastAnswerCorrect) {
                                 int points = currentQ.getPoints() * bonus;
 
-                                // Acesso ao GameState e cálculo da equipa com Game ID
                                 int myTeamId = server.getTeamIdForPlayer(this, gameId);
 
                                 synchronized (server.getGameState(gameId)) {

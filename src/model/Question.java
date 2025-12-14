@@ -6,7 +6,7 @@ import java.util.List;
 public class Question implements Serializable {
     private String question;
     private int points;
-    private int correct; // 1-based index of correct option
+    private int correct; 
     private List<String> options;
 
     public Question(String question, int points, int correct, List<String> options) {
